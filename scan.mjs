@@ -289,8 +289,15 @@ function analyze(p){
   if(stale) gates.push('Data looks stale (last closed candle is '+Math.round(ageMs/60000)+' min old). Market may be closed.');
   if(adxV<20) gates.push('ADX is '+adxV.toFixed(1)+' (below 20): market is ranging, trend signals are unreliable.');
   if(Math.abs(score)<50) gates.push('Combined score '+(score>0?'+':'')+score+' is below the ±50 threshold.');
-  if(direction>0 && rsiV>=78) gates.push('RSI '+rsiV.toFixed(1)+' is extremely overbought; buying here is chasing.');
-  if(direction<0 && rsiV<=22) gates.push('RSI '+rsiV.toFixed(1)+' is extremely oversold; selling here is chasing.');
+  if(direction>0 && rsiV>=70) gates.push('RSI '+rsiV.toFixed(1)+' is overbought; buying here is chasing the move.');
+  if(direction<0 && rsiV<=30) gates.push('RSI '+rsiV.toFixed(1)+' is oversold; selling here is chasing the move.');
+  // late-entry filters: the move has already happened, a bounce / pullback is more likely than continuation
+  const stretchATR=(price-e21[i])/atrV;
+  if(direction>0 && stretchATR>2) gates.push('Price is '+stretchATR.toFixed(1)+' ATR above its EMA21 (stretched). Wait for a pullback.');
+  if(direction<0 && stretchATR<-2) gates.push('Price is '+Math.abs(stretchATR).toFixed(1)+' ATR below its EMA21 (stretched). Wait for a pullback.');
+  const moveATR=(c[i]-c[i-8])/atrV;
+  if(direction>0 && moveATR>5) gates.push('Price already rose '+moveATR.toFixed(1)+' ATR in the last 8 candles. Too late to buy.');
+  if(direction<0 && moveATR<-5) gates.push('Price already fell '+Math.abs(moveATR).toFixed(1)+' ATR in the last 8 candles. Too late to sell.');
   if(hb && direction!==0 && hb.score*direction<=-13) gates.push('Higher-timeframe trend ('+hb.label+') is against this direction.');
   const signal=gates.length===0&&direction!==0?(direction>0?'BUY':'SELL'):'NO TRADE';
   const conf=Math.min(100,Math.abs(score));
