@@ -1,34 +1,34 @@
 {
  "done": {
-  "crypto|BTCUSDT|15m": 1795236300000,
-  "crypto|BTCUSDT|1h": 1795233600000,
+  "crypto|BTCUSDT|15m": 1795239000000,
+  "crypto|BTCUSDT|1h": 1795237200000,
   "crypto|BTCUSDT|4h": 1795233600000,
-  "crypto|ETHUSDT|15m": 1795236300000,
-  "crypto|ETHUSDT|1h": 1795233600000,
+  "crypto|ETHUSDT|15m": 1795239000000,
+  "crypto|ETHUSDT|1h": 1795237200000,
   "crypto|ETHUSDT|4h": 1795233600000,
-  "crypto|SOLUSDT|15m": 1795236300000,
-  "crypto|SOLUSDT|1h": 1795233600000,
+  "crypto|SOLUSDT|15m": 1795239000000,
+  "crypto|SOLUSDT|1h": 1795237200000,
   "crypto|SOLUSDT|4h": 1795233600000,
-  "crypto|BNBUSDT|15m": 1795236300000,
-  "crypto|BNBUSDT|1h": 1795233600000,
+  "crypto|BNBUSDT|15m": 1795239000000,
+  "crypto|BNBUSDT|1h": 1795237200000,
   "crypto|BNBUSDT|4h": 1795233600000,
-  "crypto|XRPUSDT|15m": 1795236300000,
-  "crypto|XRPUSDT|1h": 1795233600000,
+  "crypto|XRPUSDT|15m": 1795239000000,
+  "crypto|XRPUSDT|1h": 1795237200000,
   "crypto|XRPUSDT|4h": 1795233600000,
-  "crypto|ADAUSDT|15m": 1795236300000,
-  "crypto|ADAUSDT|1h": 1795233600000,
+  "crypto|ADAUSDT|15m": 1795239000000,
+  "crypto|ADAUSDT|1h": 1795237200000,
   "crypto|ADAUSDT|4h": 1795233600000,
-  "crypto|DOGEUSDT|15m": 1795236300000,
-  "crypto|DOGEUSDT|1h": 1795233600000,
+  "crypto|DOGEUSDT|15m": 1795239000000,
+  "crypto|DOGEUSDT|1h": 1795237200000,
   "crypto|DOGEUSDT|4h": 1795233600000,
-  "crypto|LINKUSDT|15m": 1795236300000,
-  "crypto|LINKUSDT|1h": 1795233600000,
+  "crypto|LINKUSDT|15m": 1795239000000,
+  "crypto|LINKUSDT|1h": 1795237200000,
   "crypto|LINKUSDT|4h": 1795233600000,
-  "crypto|AVAXUSDT|15m": 1795236300000,
-  "crypto|AVAXUSDT|1h": 1795233600000,
+  "crypto|AVAXUSDT|15m": 1795239000000,
+  "crypto|AVAXUSDT|1h": 1795237200000,
   "crypto|AVAXUSDT|4h": 1795233600000,
-  "crypto|TONUSDT|15m": 1795236300000,
-  "crypto|TONUSDT|1h": 1795233600000,
+  "crypto|TONUSDT|15m": 1795239000000,
+  "crypto|TONUSDT|1h": 1795237200000,
   "crypto|TONUSDT|4h": 1795233600000
  },
  "alerts": {
@@ -46,7 +46,7 @@
   },
   "crypto|BNBUSDT|15m": {
    "signal": "SELL",
-   "t": 1795222800000
+   "t": 1795238100000
   },
   "crypto|BNBUSDT|1h": {
    "signal": "SELL",
@@ -66,7 +66,7 @@
   },
   "crypto|ETHUSDT|15m": {
    "signal": "SELL",
-   "t": 1795226400000
+   "t": 1795238100000
   },
   "crypto|ADAUSDT|1h": {
    "signal": "SELL",
@@ -99,23 +99,27 @@
   "crypto|AVAXUSDT|15m": {
    "signal": "SELL",
    "t": 1795235400000
+  },
+  "crypto|BTCUSDT|15m": {
+   "signal": "SELL",
+   "t": 1795238100000
   }
  },
  "retry": {
-  "synth|R_10|1h": 1795237416301,
-  "synth|R_10|15m": 1795237416287,
-  "synth|R_10|4h": 1795237416305,
-  "synth|R_25|15m": 1795237416246,
-  "synth|R_25|4h": 1795237421488,
-  "synth|R_25|1h": 1795237421435,
-  "synth|R_75|15m": 1795237421455,
-  "synth|R_75|1h": 1795237421503,
-  "synth|R_75|4h": 1795237426554,
-  "synth|R_100|15m": 1795237426568,
-  "synth|R_100|1h": 1795237426656,
-  "synth|R_100|4h": 1795237426687,
-  "synth|stpRNG|15m": 1795237431751,
-  "synth|stpRNG|1h": 1795237431674,
-  "synth|stpRNG|4h": 1795237431789
+  "synth|R_10|1h": 1795240618517,
+  "synth|R_10|15m": 1795240618493,
+  "synth|R_10|4h": 1795240618847,
+  "synth|R_25|15m": 1795240618557,
+  "synth|R_25|4h": 1795240623745,
+  "synth|R_25|1h": 1795240623771,
+  "synth|R_75|15m": 1795240623798,
+  "synth|R_75|1h": 1795240624082,
+  "synth|R_75|4h": 1795240628969,
+  "synth|R_100|15m": 1795240629002,
+  "synth|R_100|1h": 1795240629035,
+  "synth|R_100|4h": 1795240629310,
+  "synth|stpRNG|15m": 1795240634242,
+  "synth|stpRNG|1h": 1795240634237,
+  "synth|stpRNG|4h": 1795240634543
  }
 }
