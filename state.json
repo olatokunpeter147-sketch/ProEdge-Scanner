@@ -1,35 +1,35 @@
 {
  "done": {
-  "crypto|BTCUSDT|15m": 1795232700000,
-  "crypto|BTCUSDT|1h": 1795230000000,
-  "crypto|BTCUSDT|4h": 1795219200000,
-  "crypto|ETHUSDT|15m": 1795232700000,
-  "crypto|ETHUSDT|1h": 1795230000000,
-  "crypto|ETHUSDT|4h": 1795219200000,
-  "crypto|SOLUSDT|15m": 1795232700000,
-  "crypto|SOLUSDT|1h": 1795230000000,
-  "crypto|SOLUSDT|4h": 1795219200000,
-  "crypto|BNBUSDT|15m": 1795232700000,
-  "crypto|BNBUSDT|1h": 1795230000000,
-  "crypto|BNBUSDT|4h": 1795219200000,
-  "crypto|XRPUSDT|15m": 1795232700000,
-  "crypto|XRPUSDT|1h": 1795230000000,
-  "crypto|XRPUSDT|4h": 1795219200000,
-  "crypto|ADAUSDT|15m": 1795232700000,
-  "crypto|ADAUSDT|1h": 1795230000000,
-  "crypto|ADAUSDT|4h": 1795219200000,
-  "crypto|DOGEUSDT|15m": 1795232700000,
-  "crypto|DOGEUSDT|1h": 1795230000000,
-  "crypto|DOGEUSDT|4h": 1795219200000,
-  "crypto|LINKUSDT|15m": 1795232700000,
-  "crypto|LINKUSDT|1h": 1795230000000,
-  "crypto|LINKUSDT|4h": 1795219200000,
-  "crypto|AVAXUSDT|15m": 1795232700000,
-  "crypto|AVAXUSDT|1h": 1795230000000,
-  "crypto|AVAXUSDT|4h": 1795219200000,
-  "crypto|TONUSDT|15m": 1795232700000,
-  "crypto|TONUSDT|1h": 1795230000000,
-  "crypto|TONUSDT|4h": 1795219200000
+  "crypto|BTCUSDT|15m": 1795236300000,
+  "crypto|BTCUSDT|1h": 1795233600000,
+  "crypto|BTCUSDT|4h": 1795233600000,
+  "crypto|ETHUSDT|15m": 1795236300000,
+  "crypto|ETHUSDT|1h": 1795233600000,
+  "crypto|ETHUSDT|4h": 1795233600000,
+  "crypto|SOLUSDT|15m": 1795236300000,
+  "crypto|SOLUSDT|1h": 1795233600000,
+  "crypto|SOLUSDT|4h": 1795233600000,
+  "crypto|BNBUSDT|15m": 1795236300000,
+  "crypto|BNBUSDT|1h": 1795233600000,
+  "crypto|BNBUSDT|4h": 1795233600000,
+  "crypto|XRPUSDT|15m": 1795236300000,
+  "crypto|XRPUSDT|1h": 1795233600000,
+  "crypto|XRPUSDT|4h": 1795233600000,
+  "crypto|ADAUSDT|15m": 1795236300000,
+  "crypto|ADAUSDT|1h": 1795233600000,
+  "crypto|ADAUSDT|4h": 1795233600000,
+  "crypto|DOGEUSDT|15m": 1795236300000,
+  "crypto|DOGEUSDT|1h": 1795233600000,
+  "crypto|DOGEUSDT|4h": 1795233600000,
+  "crypto|LINKUSDT|15m": 1795236300000,
+  "crypto|LINKUSDT|1h": 1795233600000,
+  "crypto|LINKUSDT|4h": 1795233600000,
+  "crypto|AVAXUSDT|15m": 1795236300000,
+  "crypto|AVAXUSDT|1h": 1795233600000,
+  "crypto|AVAXUSDT|4h": 1795233600000,
+  "crypto|TONUSDT|15m": 1795236300000,
+  "crypto|TONUSDT|1h": 1795233600000,
+  "crypto|TONUSDT|4h": 1795233600000
  },
  "alerts": {
   "crypto|BTCUSDT|1h": {
@@ -79,23 +79,43 @@
   "crypto|XRPUSDT|15m": {
    "signal": "SELL",
    "t": 1795231800000
+  },
+  "crypto|SOLUSDT|15m": {
+   "signal": "SELL",
+   "t": 1795235400000
+  },
+  "crypto|ADAUSDT|15m": {
+   "signal": "SELL",
+   "t": 1795235400000
+  },
+  "crypto|DOGEUSDT|15m": {
+   "signal": "SELL",
+   "t": 1795235400000
+  },
+  "crypto|LINKUSDT|15m": {
+   "signal": "SELL",
+   "t": 1795235400000
+  },
+  "crypto|AVAXUSDT|15m": {
+   "signal": "SELL",
+   "t": 1795235400000
   }
  },
  "retry": {
-  "synth|R_10|1h": 1795234275038,
-  "synth|R_10|15m": 1795234274895,
-  "synth|R_10|4h": 1795234275030,
-  "synth|R_25|15m": 1795234275211,
-  "synth|R_25|4h": 1795234280111,
-  "synth|R_25|1h": 1795234279994,
-  "synth|R_75|15m": 1795234280104,
-  "synth|R_75|1h": 1795234280255,
-  "synth|R_75|4h": 1795234285086,
-  "synth|R_100|15m": 1795234285182,
-  "synth|R_100|1h": 1795234285157,
-  "synth|R_100|4h": 1795234285341,
-  "synth|stpRNG|15m": 1795234290143,
-  "synth|stpRNG|1h": 1795234290254,
-  "synth|stpRNG|4h": 1795234290263
+  "synth|R_10|1h": 1795237416301,
+  "synth|R_10|15m": 1795237416287,
+  "synth|R_10|4h": 1795237416305,
+  "synth|R_25|15m": 1795237416246,
+  "synth|R_25|4h": 1795237421488,
+  "synth|R_25|1h": 1795237421435,
+  "synth|R_75|15m": 1795237421455,
+  "synth|R_75|1h": 1795237421503,
+  "synth|R_75|4h": 1795237426554,
+  "synth|R_100|15m": 1795237426568,
+  "synth|R_100|1h": 1795237426656,
+  "synth|R_100|4h": 1795237426687,
+  "synth|stpRNG|15m": 1795237431751,
+  "synth|stpRNG|1h": 1795237431674,
+  "synth|stpRNG|4h": 1795237431789
  }
 }
