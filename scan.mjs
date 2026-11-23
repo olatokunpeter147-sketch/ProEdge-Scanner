@@ -1,7 +1,8 @@
-/* ProEdge Scanner: runs on GitHub Actions and sends BUY/SELL alerts to Telegram.
-   The signal engine below is identical to ProEdge_v2.html, so the app and the scanner always agree. */
+/* ProEdge Scanner v3: runs on GitHub Actions and sends BUY/SELL alerts to Telegram.
+   Pure price action: double top/bottom, head & shoulders, structure break & retest, support/resistance zones, fair value gaps.
+   The engine below is identical to the one inside ProEdge_v3.html, so the app and the scanner always agree. */
 
-/* ======== SIGNAL ENGINE (same as ProEdge_v2.html) ======== */
+/* ======== PRICE-ACTION ENGINE (same as ProEdge_v3.html) ======== */
 const TF = {
   '5m':  {ms:300000,   htf:'15m'},
   '15m': {ms:900000,   htf:'1h'},
@@ -9,9 +10,9 @@ const TF = {
   '4h':  {ms:14400000, htf:'1d'},
   '1d':  {ms:86400000, htf:null}
 };
+const THRESH = 65;          // minimum score for a signal
 const isNum = v => typeof v === 'number' && isFinite(v);
 const last = a => a[a.length-1];
-const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
 function dec(p){ const a=Math.abs(p); return a>=1000?2:a>=100?3:a>=10?4:a>=1?5:6; }
 function fmt(p){ return isNum(p) ? p.toFixed(dec(p)) : '—'; }
 
@@ -65,267 +66,395 @@ function resample(cs, ms){
   return out;
 }
 
-/* ---------- indicators ---------- */
-function emaNaN(v,n){
-  const out=new Array(v.length).fill(NaN);
-  let s=-1; for(let i=0;i<v.length;i++){ if(isNum(v[i])){ s=i; break; } }
-  if(s<0 || v.length-s<n) return out;
-  let sum=0; for(let i=s;i<s+n;i++) sum+=v[i];
-  let prev=sum/n; out[s+n-1]=prev;
-  const k=2/(n+1);
-  for(let i=s+n;i<v.length;i++){ prev=v[i]*k+prev*(1-k); out[i]=prev; }
-  return out;
-}
-function rsiCalc(c,n=14){
-  const out=new Array(c.length).fill(NaN);
-  if(c.length<=n) return out;
-  let g=0,l=0;
-  for(let i=1;i<=n;i++){ const d=c[i]-c[i-1]; if(d>0) g+=d; else l-=d; }
-  let ag=g/n, al=l/n;
-  const f=()=> (ag===0&&al===0)?50:(al===0?100:100-100/(1+ag/al));
-  out[n]=f();
-  for(let i=n+1;i<c.length;i++){
-    const d=c[i]-c[i-1];
-    ag=(ag*(n-1)+(d>0?d:0))/n;
-    al=(al*(n-1)+(d<0?-d:0))/n;
-    out[i]=f();
-  }
-  return out;
-}
-function trCalc(h,l,c){
-  const t=[h[0]-l[0]];
-  for(let i=1;i<c.length;i++) t.push(Math.max(h[i]-l[i],Math.abs(h[i]-c[i-1]),Math.abs(l[i]-c[i-1])));
-  return t;
-}
+/* ---------- volatility (used only to measure distances) ---------- */
 function atrCalc(h,l,c,n=14){
-  const tr=trCalc(h,l,c), out=new Array(c.length).fill(NaN);
-  if(tr.length<n) return out;
+  const out=new Array(c.length).fill(NaN);
+  if(c.length<n) return out;
+  const tr=[h[0]-l[0]];
+  for(let i=1;i<c.length;i++) tr.push(Math.max(h[i]-l[i],Math.abs(h[i]-c[i-1]),Math.abs(l[i]-c[i-1])));
   let s=0; for(let i=0;i<n;i++) s+=tr[i];
   let a=s/n; out[n-1]=a;
   for(let i=n;i<tr.length;i++){ a=(a*(n-1)+tr[i])/n; out[i]=a; }
   return out;
 }
-function adxCalc(h,l,c,n=14){
-  const N=c.length;
-  const pdi=new Array(N).fill(NaN), mdi=new Array(N).fill(NaN), adx=new Array(N).fill(NaN);
-  if(N<2*n+1) return {pdi,mdi,adx};
-  const tr=[0],pdm=[0],mdm=[0];
-  for(let i=1;i<N;i++){
-    const up=h[i]-h[i-1], dn=l[i-1]-l[i];
-    pdm.push(up>dn&&up>0?up:0);
-    mdm.push(dn>up&&dn>0?dn:0);
-    tr.push(Math.max(h[i]-l[i],Math.abs(h[i]-c[i-1]),Math.abs(l[i]-c[i-1])));
-  }
-  let trS=0,pS=0,mS=0;
-  for(let i=1;i<=n;i++){ trS+=tr[i]; pS+=pdm[i]; mS+=mdm[i]; }
-  const dx=new Array(N).fill(NaN);
-  const setDI=i=>{
-    pdi[i]=trS?100*pS/trS:0; mdi[i]=trS?100*mS/trS:0;
-    const s=pdi[i]+mdi[i]; dx[i]=s?100*Math.abs(pdi[i]-mdi[i])/s:0;
-  };
-  setDI(n);
-  for(let i=n+1;i<N;i++){ trS=trS-trS/n+tr[i]; pS=pS-pS/n+pdm[i]; mS=mS-mS/n+mdm[i]; setDI(i); }
-  let s=0; for(let i=n;i<=2*n-1;i++) s+=dx[i];
-  let a=s/n; adx[2*n-1]=a;
-  for(let i=2*n;i<N;i++){ a=(a*(n-1)+dx[i])/n; adx[i]=a; }
-  return {pdi,mdi,adx};
-}
-function macdCalc(c,f=12,s=26,sg=9){
-  const ef=emaNaN(c,f), es=emaNaN(c,s);
-  const line=c.map((_,i)=>isNum(ef[i])&&isNum(es[i])?ef[i]-es[i]:NaN);
-  const sig=emaNaN(line,sg);
-  const hist=line.map((v,i)=>isNum(v)&&isNum(sig[i])?v-sig[i]:NaN);
-  return {line,sig,hist};
-}
-function swingPoints(h,l,L=3,R=3){
-  const highs=[],lows=[];
-  for(let i=L;i<h.length-R;i++){
-    let isH=true,isL=true;
-    for(let k=1;k<=L;k++){ if(h[i-k]>=h[i]) isH=false; if(l[i-k]<=l[i]) isL=false; }
-    for(let k=1;k<=R;k++){ if(h[i+k]>h[i]) isH=false; if(l[i+k]<l[i]) isL=false; }
-    if(isH) highs.push({i,p:h[i]});
-    if(isL) lows.push({i,p:l[i]});
-  }
-  return {highs,lows};
-}
+// mirror the market upside-down so that every bullish detector also gives the bearish one
+function negate(cs){ return cs.map(k=>({t:k.t,o:-k.o,h:-k.l,l:-k.h,c:-k.c,v:k.v})); }
 
-/* ---------- fair value gaps (unfilled only) ---------- */
-function findFVGs(o,h,l,c,atr,lookback=100){
+/* ---------- swings, structure, zones, fair value gaps ---------- */
+function pivots(h,l,k){
+  const out=[];
+  for(let i=k;i<h.length-k;i++){
+    let isH=true,isL=true;
+    for(let j=1;j<=k;j++){
+      if(h[i-j]>=h[i]||h[i+j]>h[i]) isH=false;
+      if(l[i-j]<=l[i]||l[i+j]<l[i]) isL=false;
+    }
+    if(isH) out.push({i,p:h[i],type:'H'});
+    if(isL) out.push({i,p:l[i],type:'L'});
+  }
+  return out.sort((a,b)=>a.i-b.i);
+}
+// swings that alternate high/low and each move at least minATR from the previous one
+function zigzag(h,l,atr,fb,k,minATR){
+  const raw=pivots(h,l,k), out=[];
+  for(const pv of raw){
+    const prev=out[out.length-1];
+    if(!prev){ out.push(pv); continue; }
+    if(pv.type===prev.type){
+      if(pv.type==='H' ? pv.p>prev.p : pv.p<prev.p) out[out.length-1]=pv;
+      continue;
+    }
+    const a=isNum(atr[pv.i])?atr[pv.i]:fb;
+    if(Math.abs(pv.p-prev.p)>=minATR*a) out.push(pv);
+  }
+  for(let q=0;q<out.length;q++){
+    const ref=q>0?out[q-1]:out[q+1];
+    out[q].leg=ref?Math.abs(out[q].p-ref.p):0;
+  }
+  return out;
+}
+function structure(sw,close,A){
+  const H=sw.filter(s=>s.type==='H'), L=sw.filter(s=>s.type==='L');
+  if(H.length<2||L.length<2) return {dir:0,broken:false,label:'Not enough structure yet',rangeHigh:NaN,rangeLow:NaN};
+  const h1=H[H.length-2],h2=H[H.length-1],l1=L[L.length-2],l2=L[L.length-1],tol=0.15*A;
+  const hh=h2.p>h1.p+tol, lh=h2.p<h1.p-tol, hl=l2.p>l1.p+tol, ll=l2.p<l1.p-tol;
+  let dir=0, broken=false, label='Ranging market';
+  if(hh&&hl){ dir=1; label='Bullish trend (higher highs, higher lows)'; }
+  else if(lh&&ll){ dir=-1; label='Bearish trend (lower highs, lower lows)'; }
+  if(dir===1 && close<l2.p-0.1*A){ dir=0; broken=true; label='Bullish structure broken (possible reversal)'; }
+  else if(dir===-1 && close>h2.p+0.1*A){ dir=0; broken=true; label='Bearish structure broken (possible reversal)'; }
+  return {dir,broken,label,rangeHigh:Math.max(h1.p,h2.p),rangeLow:Math.min(l1.p,l2.p)};
+}
+// support/resistance zones = clusters of swing points at about the same price
+function buildZones(sw,A){
+  const pts=sw.map(s=>({p:s.p,i:s.i,leg:s.leg||0})).sort((a,b)=>a.p-b.p);
+  const groups=[]; let cur=null;
+  for(const pt of pts){
+    if(cur && pt.p-cur.maxP<=0.5*A && pt.p-cur.minP<=1.0*A){ cur.pts.push(pt); cur.maxP=pt.p; }
+    else { if(cur) groups.push(cur); cur={pts:[pt],minP:pt.p,maxP:pt.p}; }
+  }
+  if(cur) groups.push(cur);
+  const pad=0.12*A;
+  return groups.map(g=>{
+    const touches=g.pts.length, maxLeg=Math.max(...g.pts.map(x=>x.leg));
+    return {bottom:g.minP-pad,top:g.maxP+pad,touches,lastI:Math.max(...g.pts.map(x=>x.i)),major:touches>=2||maxLeg>=3*A};
+  });
+}
+function findFVGs(o,h,l,c,atr,lookback){
   const N=h.length, start=Math.max(2,N-lookback), res=[];
   for(let i=start;i<N;i++){
     const a=atr[i]; if(!isNum(a)) continue;
-    const minGap=a*0.15;
+    const minGap=a*0.25;
     let z=null;
     if(l[i]-h[i-2]>=minGap && c[i-1]>o[i-1]) z={type:'bull',top:l[i],bottom:h[i-2],i};
     else if(l[i-2]-h[i]>=minGap && c[i-1]<o[i-1]) z={type:'bear',top:l[i-2],bottom:h[i],i};
     if(!z) continue;
     let filled=false;
-    for(let j=i+1;j<N;j++){
-      if(z.type==='bull' && l[j]<=z.bottom){ filled=true; break; }
-      if(z.type==='bear' && h[j]>=z.top){ filled=true; break; }
+    for(let q=i+1;q<N;q++){
+      if(z.type==='bull' && l[q]<=z.bottom){ filled=true; break; }
+      if(z.type==='bear' && h[q]>=z.top){ filled=true; break; }
     }
     if(!filled) res.push(z);
   }
   return res;
 }
 
-/* ---------- candlestick patterns on candle i ---------- */
-function detectPatterns(o,h,l,c,i,atrv,ema21){
-  const out=[];
-  if(i<6) return out;
-  const body=k=>Math.abs(c[k]-o[k]), rng=k=>h[k]-l[k];
-  const up=k=>h[k]-Math.max(o[k],c[k]), lo=k=>Math.min(o[k],c[k])-l[k];
-  const bull=k=>c[k]>o[k], bear=k=>c[k]<o[k];
-  const R=rng(i), B=body(i);
-  if(!(R>0)) return out;
-  const downCtx = c[i-1]<c[i-6] && (!isNum(ema21[i-1]) || c[i-1]<ema21[i-1]);
-  const upCtx   = c[i-1]>c[i-6] && (!isNum(ema21[i-1]) || c[i-1]>ema21[i-1]);
-  if(B<=0.1*R) out.push({name:'Doji (indecision)',dir:0,w:0});
-  if(B<=0.4*R && lo(i)>=2*B && lo(i)>=0.6*R && up(i)<=0.25*R)
-    out.push(downCtx?{name:'Hammer',dir:1,w:8}:{name:'Bullish pin bar',dir:1,w:5});
-  if(B<=0.4*R && up(i)>=2*B && up(i)>=0.6*R && lo(i)<=0.25*R)
-    out.push(upCtx?{name:'Shooting star',dir:-1,w:8}:{name:'Bearish pin bar',dir:-1,w:5});
-  if(bull(i)&&bear(i-1)&&c[i]>=o[i-1]&&o[i]<=c[i-1]&&B>body(i-1)&&B>=0.5*atrv)
-    out.push({name:'Bullish engulfing',dir:1,w:downCtx?10:7});
-  if(bear(i)&&bull(i-1)&&c[i]<=o[i-1]&&o[i]>=c[i-1]&&B>body(i-1)&&B>=0.5*atrv)
-    out.push({name:'Bearish engulfing',dir:-1,w:upCtx?10:7});
-  if(i>=2){
-    if(bear(i-2)&&body(i-2)>=0.6*rng(i-2)&&body(i-1)<=0.35*body(i-2)&&bull(i)&&c[i]>(o[i-2]+c[i-2])/2)
-      out.push({name:'Morning star',dir:1,w:12});
-    if(bull(i-2)&&body(i-2)>=0.6*rng(i-2)&&body(i-1)<=0.35*body(i-2)&&bear(i)&&c[i]<(o[i-2]+c[i-2])/2)
-      out.push({name:'Evening star',dir:-1,w:12});
-    if(bull(i)&&bull(i-1)&&bull(i-2)&&c[i]>c[i-1]&&c[i-1]>c[i-2]&&o[i]>o[i-1]&&o[i-1]>o[i-2]&&body(i)>=0.5*R&&body(i-1)>=0.5*rng(i-1)&&body(i-2)>=0.5*rng(i-2))
-      out.push({name:'Three white soldiers',dir:1,w:9});
-    if(bear(i)&&bear(i-1)&&bear(i-2)&&c[i]<c[i-1]&&c[i-1]<c[i-2]&&o[i]<o[i-1]&&o[i-1]<o[i-2]&&body(i)>=0.5*R&&body(i-1)>=0.5*rng(i-1)&&body(i-2)>=0.5*rng(i-2))
-      out.push({name:'Three black crows',dir:-1,w:9});
+/* ---------- every LONG setup on the last closed candle (the bearish ones come from the mirrored market) ---------- */
+function longSetups(cs,htfDir,sg){
+  const N=cs.length, j=N-1;
+  const o=cs.map(k=>k.o), h=cs.map(k=>k.h), l=cs.map(k=>k.l), c=cs.map(k=>k.c);
+  const atr=atrCalc(h,l,c,14), A=atr[j];
+  if(!(A>0)) return {setups:[],ctx:null};
+  const px=v=>fmt(sg*v);
+  const dw=sg>0?'bullish':'bearish', ow=sg>0?'bearish':'bullish';
+  const side=sg>0?'below':'above';
+  const sw=zigzag(h,l,atr,A,3,1.2);
+  const st=structure(sw,c[j],A);
+  const zones=buildZones(sw.filter(s=>s.i>=N-250),A);
+  const fvgs=findFVGs(o,h,l,c,atr,120);
+  const highs=sw.filter(s=>s.type==='H'), lows=sw.filter(s=>s.type==='L');
+  const NM={
+    bos: sg>0?'Bullish structure break & retest':'Bearish structure break & retest',
+    db:  sg>0?'Double bottom':'Double top',
+    hs:  sg>0?'Inverse head & shoulders':'Head & shoulders',
+    zone:sg>0?'Support zone rejection':'Resistance zone rejection'
+  };
+  const rngJ=Math.max(h[j]-l[j],1e-12);
+  const lowWick=(Math.min(o[j],c[j])-l[j])/rngJ;
+  const raw=[];
+
+  function finish(kind,base,entry,sl,level,draw,notes,bonus){
+    const risk=entry-sl;
+    let score=base+(bonus||0);
+    const blocks=[], nts=notes.slice();
+    if(kind==='bos'||kind==='zone'){
+      if(st.dir===1){ score+=(kind==='bos'?16:14); nts.push('Market structure is '+dw+' (trade goes with the trend)'); }
+      else if(st.dir===0){ score+=(kind==='bos'?6:8); nts.push(st.broken?'The previous '+ow+' structure has just broken':'Market is ranging'); }
+      else blocks.push('Market structure is '+ow+', so this would be a counter-trend trade.');
+    }
+    if(htfDir===1){ score+=12; nts.push('Higher timeframe trend is '+dw); }
+    else if(htfDir===0){ score+=4; }
+    else blocks.push('Higher timeframe trend is '+ow+', against this trade.');
+    if(kind==='bos'){
+      const zc=zones.find(z=>z.touches>=2&&level>=z.bottom-0.3*A&&level<=z.top+0.3*A);
+      if(zc){ score+=8; nts.push('The broken level is a strong zone ('+zc.touches+' touches)'); }
+    }
+    const demand=fvgs.find(f=>f.type==='bull'&&f.top<=entry+0.1*A&&f.top>=entry-1.5*A);
+    if(demand){ score+=6; nts.push('Unfilled '+dw+' fair value gap just '+side+' price'); }
+    const supply=fvgs.find(f=>f.type==='bear'&&f.bottom>=entry-0.1*A&&f.bottom<=entry+1.5*risk);
+    if(supply){ score-=8; nts.push('An unfilled '+ow+' fair value gap ahead is a headwind'); }
+    if(risk<0.7*A) blocks.push('Stop loss would be too tight ('+(risk/A).toFixed(1)+' ATR).');
+    if(risk>3.5*A) blocks.push('Stop loss would be too wide ('+(risk/A).toFixed(1)+' ATR).');
+    const over=zones.filter(z=>z.major&&z.bottom>entry+0.2*A).sort((a,b)=>a.bottom-b.bottom)[0];
+    if(over){
+      const d=over.bottom-entry;
+      if(d<1.5*risk) blocks.push((sg>0?'Resistance':'Support')+' zone near '+px(over.bottom)+' is only '+(d/A).toFixed(1)+' ATR away, not enough room for the targets.');
+    }
+    raw.push({kind,name:NM[kind],score:Math.round(score),notes:nts,blocks,entry,sl,risk,level,draw});
   }
-  if(B>=0.85*R && B>=0.8*atrv) out.push(bull(i)?{name:'Bullish marubozu',dir:1,w:5}:{name:'Bearish marubozu',dir:-1,w:5});
-  return out;
+
+  /* 1) structure break + retest: price closes through a swing high, comes back, touches it and holds */
+  {
+    let best=null;
+    for(const s of highs){
+      if(s.i<N-100) continue;
+      let b=-1;
+      for(let q=s.i+1;q<N;q++){ if(c[q]>s.p+0.15*A){ b=q; break; } }
+      if(b<0||b>=j||j-b>40) continue;
+      if(!(c[b]>o[b] && ((c[b]-o[b])>=0.45*A || (c[b]-s.p)>=0.35*A))) continue;
+      let r=-1;
+      for(let q=b+1;q<N;q++){
+        if(c[q]<s.p-0.3*A){ r=-2; break; }
+        if(l[q]<=s.p+0.25*A){ r=q; break; }
+      }
+      if(r!==j) continue;
+      if(!(c[j]>s.p && l[j]>=s.p-0.5*A)) continue;
+      if(!(c[j]>o[j] || lowWick>=0.4)) continue;
+      if(!best||s.p>best.s.p) best={s,b};
+    }
+    if(best){
+      const s=best.s, b=best.b;
+      const entry=c[j], sl=Math.min(l[j],s.p)-0.35*A;
+      let bonus=0;
+      if((c[b]-o[b])>=0.8*A) bonus+=4;
+      if(lowWick>=0.4) bonus+=4;
+      finish('bos',50,entry,sl,s.p,
+        {lines:[{i1:s.i,p1:s.p,i2:j,p2:s.p}],points:[{i:b,p:c[b]},{i:j,p:l[j]}]},
+        ['Price broke '+px(s.p)+' and came back to retest it'],bonus);
+    }
+  }
+
+  /* 2) double bottom: two equal lows, then a close above the neckline */
+  if(lows.length>=2){
+    const L2=lows[lows.length-1], L1=lows[lows.length-2];
+    const P=highs.filter(s=>s.i>L1.i&&s.i<L2.i).sort((a,b)=>b.p-a.p)[0];
+    const bf=highs.filter(s=>s.i<L1.i).slice(-1)[0];
+    if(P&&bf){
+      const lowMin=Math.min(L1.p,L2.p), lowAvg=(L1.p+L2.p)/2, height=P.p-lowAvg, spacing=L2.i-L1.i;
+      if(Math.abs(L1.p-L2.p)<=0.45*A && height>=1.5*A && spacing>=6 && spacing<=100 && bf.p-L1.p>=2*A && j-L2.i<=45){
+        let minAfter=Infinity, br=-1;
+        for(let q=L2.i+1;q<N;q++){ minAfter=Math.min(minAfter,l[q]); if(br<0&&c[q]>P.p+0.1*A) br=q; }
+        if(br>=j-1 && c[j]>P.p+0.1*A && c[j]-P.p<=1.0*A && minAfter>=lowMin-0.3*A){
+          const entry=c[j];
+          const sl=Math.max(lowMin-0.3*A, P.p-Math.min(Math.max(0.5*height,0.8*A),2.5*A));
+          let bonus=0;
+          if(Math.abs(L1.p-L2.p)<=0.2*A) bonus+=6;
+          if(height>=2.5*A) bonus+=6;
+          if((P.p+height-entry)>=1.5*(entry-sl)) bonus+=6;
+          finish('db',58,entry,sl,lowMin,
+            {lines:[{i1:P.i,p1:P.p,i2:j,p2:P.p}],points:[{i:L1.i,p:L1.p},{i:L2.i,p:L2.p}]},
+            [NM.db+' near '+px(lowAvg)+', neckline '+px(P.p)+' broken'],bonus);
+        }
+      }
+    }
+  }
+
+  /* 3) inverse head & shoulders: lower middle low, matching shoulders, close above the neckline */
+  if(lows.length>=3){
+    const RS=lows[lows.length-1], HD=lows[lows.length-2], LS=lows[lows.length-3];
+    const T1=highs.filter(s=>s.i>LS.i&&s.i<HD.i).sort((a,b)=>b.p-a.p)[0];
+    const T2=highs.filter(s=>s.i>HD.i&&s.i<RS.i).sort((a,b)=>b.p-a.p)[0];
+    const bf=highs.filter(s=>s.i<LS.i).slice(-1)[0];
+    if(T1&&T2&&bf){
+      const neckAvg=(T1.p+T2.p)/2, height=neckAvg-HD.p;
+      const nl=i=>T1.p+(T2.p-T1.p)*(i-T1.i)/(T2.i-T1.i);
+      const ratio=(HD.i-LS.i)/Math.max(1,RS.i-HD.i);
+      if(HD.p<LS.p-0.5*A && HD.p<RS.p-0.5*A && Math.abs(LS.p-RS.p)<=0.35*height && height>=1.5*A &&
+         neckAvg-RS.p>=0.8*A && ratio>=0.4 && ratio<=2.5 && RS.i-LS.i<=150 && bf.p-LS.p>=1.5*A &&
+         Math.abs(T2.p-T1.p)<=0.6*height && j-RS.i<=45){
+        let minAfter=Infinity, br=-1;
+        for(let q=RS.i+1;q<N;q++){ minAfter=Math.min(minAfter,l[q]); if(br<0&&c[q]>nl(q)+0.1*A) br=q; }
+        if(br>=j-1 && c[j]>nl(j)+0.1*A && c[j]-nl(j)<=1.0*A && minAfter>=RS.p-0.3*A){
+          const entry=c[j];
+          const sl=Math.max(RS.p-0.3*A, nl(j)-Math.min(Math.max(0.5*height,0.8*A),2.5*A));
+          let bonus=0;
+          if(Math.abs(LS.p-RS.p)<=0.2*height) bonus+=6;
+          if(Math.abs(T2.p-T1.p)<=0.2*height) bonus+=4;
+          if((nl(j)+height-entry)>=1.5*(entry-sl)) bonus+=6;
+          finish('hs',62,entry,sl,HD.p,
+            {lines:[{i1:T1.i,p1:T1.p,i2:j,p2:nl(j)}],points:[{i:LS.i,p:LS.p},{i:HD.i,p:HD.p},{i:RS.i,p:RS.p}]},
+            [NM.hs+', head near '+px(HD.p)+', neckline broken'],bonus);
+        }
+      }
+    }
+  }
+
+  /* 4) support-zone rejection: price dips into a proven zone and closes back out of it */
+  {
+    let best=null;
+    for(const z of zones){
+      if(z.touches<2||z.lastI>j-4) continue;
+      if(!(l[j]<=z.top+0.1*A && l[j]>=z.bottom-0.8*A)) continue;
+      if(!(c[j]>=z.top && c[j]>o[j])) continue;
+      let came=false;
+      for(let q=Math.max(0,j-14);q<j;q++){ if(h[q]>z.top+0.5*A){ came=true; break; } }
+      if(!came) continue;
+      const eng=j>0&&c[j-1]<o[j-1]&&c[j]>=o[j-1]&&o[j]<=c[j-1];
+      if(!(lowWick>=0.4||eng)) continue;
+      if(!best||z.touches>best.touches) best=z;
+    }
+    if(best){
+      const entry=c[j], sl=Math.min(l[j],best.bottom)-0.35*A;
+      let bonus=0;
+      if(best.touches>=3) bonus+=8;
+      if(lowWick>=0.5) bonus+=4;
+      finish('zone',48,entry,sl,best.bottom,
+        {zone:{bottom:best.bottom,top:best.top},points:[{i:j,p:l[j]}]},
+        [(sg>0?'Support':'Resistance')+' zone '+(sg>0?px(best.bottom)+' - '+px(best.top):px(best.top)+' - '+px(best.bottom))+' ('+best.touches+' touches) held and price closed back out of it'],bonus);
+    }
+  }
+
+  return {setups:raw,ctx:{A,sw,st,zones,fvgs}};
+}
+// bring a setup found in the mirrored market back to real prices
+function unm(s,sg){
+  const m=v=>sg*v;
+  const d=s.draw||{};
+  return Object.assign({},s,{
+    dir:sg,entry:m(s.entry),sl:m(s.sl),level:m(s.level),
+    draw:{
+      lines:(d.lines||[]).map(x=>({i1:x.i1,p1:m(x.p1),i2:x.i2,p2:m(x.p2)})),
+      points:(d.points||[]).map(x=>({i:x.i,p:m(x.p)})),
+      zone:d.zone?(sg>0?{bottom:d.zone.bottom,top:d.zone.top}:{bottom:-d.zone.top,top:-d.zone.bottom}):null
+    }
+  });
 }
 
-/* ---------- higher timeframe bias ---------- */
-function htfBias(cs){
-  if(!cs || cs.length<60) return null;
-  const cl=cs.map(k=>k.c), e21=emaNaN(cl,21), e50=emaNaN(cl,50), i=cl.length-1;
-  if(!isNum(e50[i])) return null;
-  const p=cl[i], a=e21[i], b=e50[i];
-  if(p>b && a>b) return {score:13,label:'Bullish'};
-  if(p<b && a<b) return {score:-13,label:'Bearish'};
-  if(p>b) return {score:5,label:'Mild bullish'};
-  if(p<b) return {score:-5,label:'Mild bearish'};
-  return {score:0,label:'Neutral'};
+/* ---------- higher timeframe: just its market structure ---------- */
+function htfTrend(cs){
+  if(!cs||cs.length<80) return null;
+  const x=cs.length>400?cs.slice(-400):cs;
+  const h=x.map(k=>k.h), l=x.map(k=>k.l), c=x.map(k=>k.c);
+  const atr=atrCalc(h,l,c,14), A=last(atr);
+  if(!(A>0)) return null;
+  const sw=zigzag(h,l,atr,A,3,1.2), st=structure(sw,last(c),A);
+  return {dir:st.dir,label:st.dir>0?'Bullish':st.dir<0?'Bearish':'Ranging',detail:st.label};
 }
 
-/* ---------- main analysis (closed candles only) ---------- */
+/* ---------- main analysis: closed candles only ---------- */
 function analyze(p){
-  const cs=p.candles, N=cs.length;
-  if(N<60) return {error:'Not enough candles ('+N+'). Need at least 60.'};
-  const o=cs.map(k=>k.o), h=cs.map(k=>k.h), l=cs.map(k=>k.l), c=cs.map(k=>k.c), t=cs.map(k=>k.t);
-  const e9=emaNaN(c,9), e21=emaNaN(c,21), e50=emaNaN(c,50), e200=emaNaN(c,200);
-  const rsiA=rsiCalc(c,14), atrA=atrCalc(h,l,c,14), adxO=adxCalc(h,l,c,14), mac=macdCalc(c);
-  const i=N-1;
-  const price=isNum(p.live)?p.live:c[i];
-  const atrV=atrA[i], rsiV=rsiA[i], adxV=adxO.adx[i], pdi=adxO.pdi[i], mdi=adxO.mdi[i];
-  if(!(atrV>0)) return {error:'Price data looks flat (ATR is zero). Market may be closed.'};
-  if(![e21[i],e50[i],rsiV,adxV,mac.hist[i],mac.hist[i-1]].every(isNum)) return {error:'Not enough history to compute all indicators.'};
-  const has200=isNum(e200[i]);
+  let cs=p.candles;
+  if(cs.length>400) cs=cs.slice(-400);
+  const N=cs.length;
+  if(N<90) return {error:'Not enough candles ('+N+'). Need at least 90.'};
+  const j=N-1;
+  const o=cs.map(k=>k.o), h=cs.map(k=>k.h), l=cs.map(k=>k.l), c=cs.map(k=>k.c);
+  const ht=htfTrend(p.htf), htfDir=ht?ht.dir:0;
+  const Lr=longSetups(cs,htfDir,1);
+  if(!Lr.ctx) return {error:'Price data looks flat (ATR is zero). The market may be closed.'};
+  const Sr=longSetups(negate(cs),-htfDir,-1);
+  const A=Lr.ctx.A;
+  const price=isNum(p.live)?p.live:c[j];
+  const all=[...Lr.setups.map(s=>unm(s,1)), ...Sr.setups.map(s=>unm(s,-1))];
 
-  const comps=[];
-  // 1) trend
-  let sT=0;
-  sT += c[i]>e50[i]?10:-10;
-  sT += e21[i]>e50[i]?8:-8;
-  if(has200) sT += e50[i]>e200[i]?7:-7;
-  comps.push({name:'Trend (EMAs)',score:sT,max:25,
-    note:'Close '+(c[i]>e50[i]?'above':'below')+' EMA50, EMA21 '+(e21[i]>e50[i]?'above':'below')+' EMA50'+(has200?', EMA50 '+(e50[i]>e200[i]?'above':'below')+' EMA200':', EMA200 n/a (short history)')});
-  // 2) MACD
-  const h0=mac.hist[i], h1=mac.hist[i-1];
-  const sM=(h0>0?8:-8)+(h0>h1?4:-4)+(mac.line[i]>0?3:-3);
-  comps.push({name:'Momentum (MACD)',score:sM,max:15,
-    note:'Histogram '+(h0>0?'positive':'negative')+' and '+(h0>h1?'rising':'falling')+', line '+(mac.line[i]>0?'above':'below')+' zero'});
-  // 3) RSI
-  let sR;
-  if(rsiV>=75) sR=-6; else if(rsiV>=60) sR=8; else if(rsiV>=50) sR=4;
-  else if(rsiV>=40) sR=-4; else if(rsiV>25) sR=-8; else sR=6;
-  comps.push({name:'RSI zone',score:sR,max:10,
-    note:'RSI '+rsiV.toFixed(1)+(rsiV>=75?' (overbought, bullish bias weakened)':rsiV<=25?' (oversold, bounce risk)':rsiV>=50?' (bullish zone)':' (bearish zone)')});
-  // 4) ADX / DI
-  const dir0=pdi>mdi?1:-1;
-  const base=adxV>=25?15:adxV>=20?10:4;
-  comps.push({name:'Trend strength (ADX)',score:dir0*base,max:15,
-    note:'ADX '+adxV.toFixed(1)+', +DI '+pdi.toFixed(1)+' vs -DI '+mdi.toFixed(1)+(adxV<20?' (weak / ranging)':adxV>=25?' (strong trend)':' (developing trend)')});
-  // 5) candle patterns
-  const pats=detectPatterns(o,h,l,c,i,atrV,e21);
-  const mb=Math.max(0,...pats.filter(x=>x.dir>0).map(x=>x.w)), ms=Math.max(0,...pats.filter(x=>x.dir<0).map(x=>x.w));
-  const sP=clamp(mb-ms,-12,12);
-  comps.push({name:'Candle pattern',score:sP,max:12,
-    note:pats.length?pats.map(x=>x.name).join(', '):'No significant pattern on the last closed candle'});
-  // 6) FVG
-  const zonesAll=findFVGs(o,h,l,c,atrA,100);
-  const dist=z=> price>z.top ? price-z.top : (price<z.bottom ? z.bottom-price : 0);
-  let sup=0,res=0;
-  for(const z of zonesAll){
-    const d=dist(z), w=d<=0.5*atrV?10:d<=atrV?6:0;
-    if(z.type==='bull') sup=Math.max(sup,w); else res=Math.max(res,w);
-  }
-  const sF=clamp(sup-res,-10,10);
-  const near=zonesAll.map(z=>({...z,d:dist(z)})).sort((a,b)=>a.d-b.d).slice(0,4);
-  comps.push({name:'Fair value gap',score:sF,max:10,
-    note:sF>0?'Open bullish FVG acting as support nearby':sF<0?'Open bearish FVG acting as resistance nearby':(sup||res)?'Bullish and bearish FVGs both nearby (cancel out)':'No open FVG close to price'});
-  // 7) higher timeframe
-  const hb=htfBias(p.htf);
-  comps.push({name:'Higher timeframe'+(p.htfTf?' ('+p.htfTf+')':''),score:hb?hb.score:0,max:13,
-    note:hb?hb.label+' trend on '+p.htfTf:(p.htfTf?'Higher-timeframe data unavailable (counted as neutral)':'No higher timeframe for this chart')});
-
-  const score=comps.reduce((a,x)=>a+x.score,0);
-  const direction=score>0?1:score<0?-1:0;
-
-  // freshness
-  const ageMs=p.now-(t[i]+p.ms);
-  const stale=ageMs>3*p.ms;
-
-  // gates
+  const ageMs=p.now-(cs[j].t+p.ms), stale=ageMs>3*p.ms;
   const gates=[];
-  if(stale) gates.push('Data looks stale (last closed candle is '+Math.round(ageMs/60000)+' min old). Market may be closed.');
-  if(adxV<20) gates.push('ADX is '+adxV.toFixed(1)+' (below 20): market is ranging, trend signals are unreliable.');
-  if(Math.abs(score)<50) gates.push('Combined score '+(score>0?'+':'')+score+' is below the ±50 threshold.');
-  if(direction>0 && rsiV>=70) gates.push('RSI '+rsiV.toFixed(1)+' is overbought; buying here is chasing the move.');
-  if(direction<0 && rsiV<=30) gates.push('RSI '+rsiV.toFixed(1)+' is oversold; selling here is chasing the move.');
-  // late-entry filters: the move has already happened, a bounce / pullback is more likely than continuation
-  const stretchATR=(price-e21[i])/atrV;
-  if(direction>0 && stretchATR>2) gates.push('Price is '+stretchATR.toFixed(1)+' ATR above its EMA21 (stretched). Wait for a pullback.');
-  if(direction<0 && stretchATR<-2) gates.push('Price is '+Math.abs(stretchATR).toFixed(1)+' ATR below its EMA21 (stretched). Wait for a pullback.');
-  const moveATR=(c[i]-c[i-8])/atrV;
-  if(direction>0 && moveATR>5) gates.push('Price already rose '+moveATR.toFixed(1)+' ATR in the last 8 candles. Too late to buy.');
-  if(direction<0 && moveATR<-5) gates.push('Price already fell '+Math.abs(moveATR).toFixed(1)+' ATR in the last 8 candles. Too late to sell.');
-  if(hb && direction!==0 && hb.score*direction<=-13) gates.push('Higher-timeframe trend ('+hb.label+') is against this direction.');
-  const signal=gates.length===0&&direction!==0?(direction>0?'BUY':'SELL'):'NO TRADE';
-  const conf=Math.min(100,Math.abs(score));
-  const grade=conf>=70?'Strong':conf>=50?'Moderate':'Weak';
+  if(stale) gates.push('Data looks stale (last closed candle is '+Math.round(ageMs/60000)+' min old). The market may be closed.');
 
-  // swing levels
-  const sw=swingPoints(h,l,3,3), win=N-100;
-  const supL=sw.lows.filter(s=>s.i>=win&&s.p<price).map(s=>s.p).sort((a,b)=>b-a)[0];
-  const resL=sw.highs.filter(s=>s.i>=win&&s.p>price).map(s=>s.p).sort((a,b)=>a-b)[0];
-
-  // trade plan
-  let plan=null;
-  if(signal!=='NO TRADE'){
-    const dir=direction; let slDist=1.5*atrV;
-    if(dir>0 && isNum(supL)){ const d=price-(supL-0.25*atrV); if(d>=atrV&&d<=2.5*atrV) slDist=d; }
-    if(dir<0 && isNum(resL)){ const d=(resL+0.25*atrV)-price; if(d>=atrV&&d<=2.5*atrV) slDist=d; }
-    plan={entry:price,sl:price-dir*slDist,tp1:price+dir*slDist*1.5,tp2:price+dir*slDist*2.5,risk:slDist,slPct:slDist/price*100};
+  const good=all.filter(s=>!s.blocks.length&&s.score>=THRESH).sort((a,b)=>b.score-a.score);
+  let pick=null;
+  if(good.length){
+    pick=good[0];
+    const rival=good.find(s=>s.dir!==pick.dir&&s.score>pick.score-10);
+    if(rival){ gates.push('A buy setup and a sell setup are both present. Conflicting, so no trade.'); pick=null; }
+  } else {
+    const cand=all.slice().sort((a,b)=>b.score-a.score)[0];
+    if(cand){
+      cand.blocks.forEach(b=>gates.push(cand.name+': '+b));
+      if(!cand.blocks.length) gates.push(cand.name+' found, but its score ('+cand.score+') is below the '+THRESH+' needed for a signal.');
+    } else gates.push('No pattern, retest or zone reaction on the last closed candle.');
   }
+  if(pick&&Math.abs(price-pick.entry)>0.5*A){ gates.push('Price has already moved '+(Math.abs(price-pick.entry)/A).toFixed(1)+' ATR away from the setup candle.'); pick=null; }
+  if(stale) pick=null;
 
-  // chart window
-  const W=70, s0=Math.max(0,N-W);
-  const chart={o:o.slice(s0),h:h.slice(s0),l:l.slice(s0),c:c.slice(s0),e21:e21.slice(s0),e50:e50.slice(s0),
-    zones:zonesAll.filter(z=>z.i>=s0-30).map(z=>({type:z.type,top:z.top,bottom:z.bottom,i:z.i-s0}))};
+  const signal=pick?(pick.dir>0?'BUY':'SELL'):'NO TRADE';
+  const direction=pick?pick.dir:0;
+  let plan=null;
+  if(pick){
+    const entry=price, risk=Math.abs(entry-pick.sl);
+    plan={entry,sl:pick.sl,tp1:entry+direction*risk*1.5,tp2:entry+direction*risk*2.5,risk,slPct:risk/entry*100};
+  }
+  const score=pick?pick.score:(all.length?all.slice().sort((a,b)=>b.score-a.score)[0].score:0);
 
-  return {symbol:p.symbol,tf:p.tf,market:p.market,price,lastT:t[i],ageMs,stale,
-    ind:{ema9:e9[i],ema21:e21[i],ema50:e50[i],ema200:has200?e200[i]:NaN,rsi:rsiV,macd:mac.line[i],macdSig:mac.sig[i],hist:h0,adx:adxV,pdi,mdi,atr:atrV,atrPct:atrV/price*100},
-    comps,score,direction,gates,signal,grade,conf,htf:hb?{...hb,tf:p.htfTf}:null,plan,
-    fvgNear:near,patterns:pats,support:supL,resist:resL,chart};
+  // context shown to the user (real, un-mirrored prices)
+  const zonesD=Lr.ctx.zones.map(z=>{
+    const inside=price>=z.bottom&&price<=z.top;
+    const type=inside?'inside':(z.top<price?'support':'resistance');
+    const dist=inside?0:(type==='support'?price-z.top:z.bottom-price);
+    return {type,bottom:z.bottom,top:z.top,touches:z.touches,dist:dist/A};
+  }).sort((a,b)=>a.dist-b.dist).slice(0,8);
+  const fvgsD=Lr.ctx.fvgs.map(f=>({type:f.type,top:f.top,bottom:f.bottom,i:f.i,
+    d:(price>f.top?price-f.top:(price<f.bottom?f.bottom-price:0))/A})).sort((a,b)=>a.d-b.d).slice(0,4);
+  const W=80, s0=Math.max(0,N-W);
+  const dr=pick?pick.draw:null;
+  const chart={o:o.slice(s0),h:h.slice(s0),l:l.slice(s0),c:c.slice(s0),zones:zonesD,
+    fvgs:fvgsD.map(f=>({type:f.type,top:f.top,bottom:f.bottom,i:f.i-s0})),
+    draw:dr?{lines:dr.lines.map(x=>({i1:x.i1-s0,p1:x.p1,i2:x.i2-s0,p2:x.p2})),points:dr.points.map(x=>({i:x.i-s0,p:x.p})),zone:dr.zone}:null};
+  const st=Lr.ctx.st;
+  return {symbol:p.symbol,tf:p.tf,market:p.market,price,lastT:cs[j].t,ageMs,stale,atr:A,
+    trend:{dir:st.dir,label:st.label,rangeHigh:st.rangeHigh,rangeLow:st.rangeLow},
+    htf:ht?{dir:ht.dir,label:ht.label,tf:p.htfTf}:null,
+    signal,direction,score,grade:pick?(pick.score>=80?'Strong':'Moderate'):'',
+    setup:pick?{name:pick.name,kind:pick.kind,notes:pick.notes}:null,
+    gates,plan,zones:zonesD,fvgs:fvgsD,chart};
+}
+
+/* ---------- backtest: replay history candle by candle, exactly as the live bot would have seen it ---------- */
+function simulateTrade(cs,t,dir,sl,tp1,maxBars){
+  const entry=cs[t].c, risk=Math.abs(entry-sl);
+  if(!(risk>0)) return null;
+  const end=Math.min(cs.length-1,t+maxBars);
+  if(end<=t) return null;
+  for(let j=t+1;j<=end;j++){
+    const hitSL=dir>0?cs[j].l<=sl:cs[j].h>=sl;
+    const hitTP=dir>0?cs[j].h>=tp1:cs[j].l<=tp1;
+    if(hitSL) return {outcome:'SL',R:-1,bars:j-t};            // if both happen in one candle, assume the stop came first (worst case)
+    if(hitTP) return {outcome:'TP',R:Math.abs(tp1-entry)/risk,bars:j-t};
+  }
+  return {outcome:end-t>=maxBars?'TIMEOUT':'OPEN',R:(cs[end].c-entry)*dir/risk,bars:end-t};
+}
+function backtest(cs,htfCs,tf,market,symbol,opts){
+  const o=Object.assign({start:120,maxBars:48,gap:8},opts||{});
+  const tfo=TF[tf], ms=tfo.ms, hms=tfo.htf?TF[tfo.htf].ms:0;
+  const trades=[]; let lastDir=0,lastT=-1e9;
+  const from=Math.max(100,Math.min(o.start,cs.length-70));
+  for(let t=from;t<cs.length-1;t++){
+    const now=cs[t].t+ms+20000;
+    const hs=htfCs?htfCs.filter(k=>k.t+hms<=now):null;
+    const r=analyze({candles:cs.slice(Math.max(0,t+1-400),t+1),live:cs[t].c,htf:hs,htfTf:tfo.htf,ms,now,market,symbol,tf});
+    if(r.error||r.signal==='NO TRADE'||!r.plan) continue;
+    if(r.direction===lastDir && t-lastT<=o.gap) continue;     // same rule as the live scanner: no repeat of the same signal within 8 candles
+    lastDir=r.direction; lastT=t;
+    const s=simulateTrade(cs,t,r.direction,r.plan.sl,r.plan.tp1,o.maxBars);
+    if(!s) continue;
+    trades.push({t:cs[t].t,dir:r.direction,entry:r.plan.entry,sl:r.plan.sl,tp1:r.plan.tp1,score:r.score,setup:r.setup.name,outcome:s.outcome,R:s.R,bars:s.bars});
+  }
+  return trades;
+}
+function btStats(trades){
+  const w=trades.filter(x=>x.outcome==='TP').length, l=trades.filter(x=>x.outcome==='SL').length, o=trades.length-w-l;
+  const totR=trades.reduce((a,x)=>a+x.R,0);
+  return {n:trades.length,w,l,o,wr:(w+l)?w/(w+l)*100:null,avgR:trades.length?totR/trades.length:0,totR};
 }
 
 /* ================================================================
@@ -338,29 +467,41 @@ const CHAT = process.env.TELEGRAM_CHAT_ID || '';
 const TDKEY = process.env.TWELVEDATA_KEY || '';
 const TEST_MODE = String(process.env.TEST_MODE || '') === 'true';
 const TIMEFRAMES = (process.env.TIMEFRAMES || '15m,1h,4h').split(',').map(s => s.trim()).filter(x => TF[x]);
-const MARKETS = (process.env.MARKETS || 'crypto,forex,synth').split(',').map(s => s.trim());
+const MARKETS = (process.env.MARKETS || 'forex,crypto,synth').split(',').map(s => s.trim());
 const STATE_FILE = 'state.json';
 const SETTLE_MS = 20000;      // wait after a candle closes before reading it
 const REPEAT_CANDLES = 8;     // never repeat the same signal within this many candles
 const RETRY_MS = 15 * 60000;  // after a data failure, wait before retrying that pair
 
-const CRYPTO = ['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT','XRPUSDT','ADAUSDT','DOGEUSDT','LINKUSDT','AVAXUSDT','TONUSDT'];
 const FOREX = [
-  {s:'EURUSD',y:['EURUSD=X'],td:'EUR/USD',bn:'EURUSDT'},
-  {s:'GBPUSD',y:['GBPUSD=X'],td:'GBP/USD',bn:'GBPUSDT'},
-  {s:'USDJPY',y:['JPY=X'],td:'USD/JPY'},
-  {s:'AUDUSD',y:['AUDUSD=X'],td:'AUD/USD',bn:'AUDUSDT'},
-  {s:'USDCAD',y:['CAD=X'],td:'USD/CAD'},
-  {s:'USDCHF',y:['CHF=X'],td:'USD/CHF'},
-  {s:'NZDUSD',y:['NZDUSD=X'],td:'NZD/USD'},
-  {s:'EURJPY',y:['EURJPY=X'],td:'EUR/JPY'},
-  {s:'GBPJPY',y:['GBPJPY=X'],td:'GBP/JPY'},
-  {s:'XAUUSD',y:['XAUUSD=X','GC=F'],td:'XAU/USD',bn:'PAXGUSDT'}
+  {s:'XAUUSD',n:'Gold (XAU/USD)',dv:'frxXAUUSD',y:['XAUUSD=X','GC=F'],td:'XAU/USD'},
+  {s:'XAGUSD',n:'Silver (XAG/USD)',dv:'frxXAGUSD',y:['XAGUSD=X','SI=F'],td:'XAG/USD'},
+  {s:'EURUSD',n:'EUR/USD',dv:'frxEURUSD',y:['EURUSD=X'],td:'EUR/USD'},
+  {s:'GBPUSD',n:'GBP/USD',dv:'frxGBPUSD',y:['GBPUSD=X'],td:'GBP/USD'},
+  {s:'USDJPY',n:'USD/JPY',dv:'frxUSDJPY',y:['JPY=X'],td:'USD/JPY'},
+  {s:'AUDUSD',n:'AUD/USD',dv:'frxAUDUSD',y:['AUDUSD=X'],td:'AUD/USD'},
+  {s:'NZDUSD',n:'NZD/USD',dv:'frxNZDUSD',y:['NZDUSD=X'],td:'NZD/USD'},
+  {s:'USDCAD',n:'USD/CAD',dv:'frxUSDCAD',y:['CAD=X'],td:'USD/CAD'},
+  {s:'USDCHF',n:'USD/CHF',dv:'frxUSDCHF',y:['CHF=X'],td:'USD/CHF'},
+  {s:'EURNZD',n:'EUR/NZD',dv:'frxEURNZD',y:['EURNZD=X'],td:'EUR/NZD'},
+  {s:'EURGBP',n:'EUR/GBP',dv:'frxEURGBP',y:['EURGBP=X'],td:'EUR/GBP'},
+  {s:'EURJPY',n:'EUR/JPY',dv:'frxEURJPY',y:['EURJPY=X'],td:'EUR/JPY'},
+  {s:'GBPJPY',n:'GBP/JPY',dv:'frxGBPJPY',y:['GBPJPY=X'],td:'GBP/JPY'},
+  {s:'AUDJPY',n:'AUD/JPY',dv:'frxAUDJPY',y:['AUDJPY=X'],td:'AUD/JPY'}
+];
+const CRYPTO = [
+  {s:'BTCUSDT',n:'BTC/USD',dv:'cryBTCUSD'},
+  {s:'ETHUSDT',n:'ETH/USD',dv:'cryETHUSD'},
+  {s:'SOLUSDT',n:'SOL/USD'},
+  {s:'XRPUSDT',n:'XRP/USD'},
+  {s:'LTCUSDT',n:'LTC/USD',dv:'cryLTCUSD'}
 ];
 const SYNTH = [
   {s:'R_10',n:'Volatility 10'},{s:'R_25',n:'Volatility 25'},{s:'R_75',n:'Volatility 75'},
   {s:'R_100',n:'Volatility 100'},{s:'stpRNG',n:'Step Index'}
 ];
+const LISTS = {forex: FOREX, crypto: CRYPTO, synth: SYNTH};
+const nameOf = (mk, s) => ((LISTS[mk] || []).find(x => x.s === s) || {n: s}).n;
 const BYBIT = {'5m':'5','15m':'15','1h':'60','4h':'240','1d':'D'};
 const OKX = {'5m':'5m','15m':'15m','1h':'1H','4h':'4H','1d':'1D'};
 const TDI = {'5m':'5min','15m':'15min','1h':'1h','4h':'4h','1d':'1day'};
@@ -371,10 +512,6 @@ const YAHOO = {
 const DERIV_GRAN = {'5m':300,'15m':900,'1h':3600,'4h':14400,'1d':86400};
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
-const labelOf = (mk, s) => mk === 'crypto' ? s.replace('USDT', '/USDT')
-  : mk === 'forex' ? s.slice(0, 3) + '/' + s.slice(3)
-  : (SYNTH.find(x => x.s === s) || {n: s}).n;
-
 /* ---------- network helpers ---------- */
 async function getJSON(url, ms = 10000, headers = {}) {
   const r = await fetch(url, {signal: AbortSignal.timeout(ms), headers});
@@ -382,87 +519,92 @@ async function getJSON(url, ms = 10000, headers = {}) {
   return r.json();
 }
 
-function derivCandles(symbol, tf) {
+function derivCandles(symbol, tf, count) {
   return new Promise((resolve, reject) => {
     let ws = null, done = false, timer = null;
     const fin = (fn, v) => { if (done) return; done = true; clearTimeout(timer); try { ws && ws.close(); } catch (e) {} fn(v); };
-    timer = setTimeout(() => fin(reject, new Error('Deriv timeout')), 12000);
+    timer = setTimeout(() => fin(reject, new Error('timeout')), 14000);
     try { ws = new WebSocket('wss://ws.derivws.com/websockets/v3?app_id=1089'); } catch (e) { return fin(reject, e); }
     ws.addEventListener('open', () => ws.send(JSON.stringify({
-      ticks_history: symbol, adjust_start_time: 1, count: 500, end: 'latest', style: 'candles', granularity: DERIV_GRAN[tf]
+      ticks_history: symbol, adjust_start_time: 1, count: count || 500, end: 'latest', style: 'candles', granularity: DERIV_GRAN[tf]
     })));
     ws.addEventListener('message', ev => {
       let j; try { j = JSON.parse(ev.data); } catch (e) { return; }
       if (j.error) return fin(reject, new Error(j.error.message || 'Deriv error'));
       if (j.candles) { try { fin(resolve, clean(parseDeriv(j))); } catch (e) { fin(reject, e); } }
     });
-    ws.addEventListener('error', () => fin(reject, new Error('Deriv connection failed')));
-    ws.addEventListener('close', () => fin(reject, new Error('Deriv connection closed')));
+    ws.addEventListener('error', () => fin(reject, new Error('connection failed')));
+    ws.addEventListener('close', () => fin(reject, new Error('connection closed')));
   });
 }
 
 async function getCandles(market, symbol, tf) {
   const errs = [];
-  if (market === 'synth') {
-    const cs = await derivCandles(symbol, tf);
-    if (cs.length < 60) throw new Error('Deriv returned too few candles');
+  const item = (LISTS[market] || []).find(x => x.s === symbol) || {};
+  const viaDeriv = async sym => {
+    const cs = await derivCandles(sym, tf, 500);
+    if (cs.length < 90) throw new Error('too few candles (' + cs.length + ')');
     return {candles: cs, source: 'Deriv'};
-  }
-  if (market === 'crypto') {
-    // GitHub's servers are in the US, where binance.com is blocked, so the mirror and OKX come first.
-    const q = base => `${base}?symbol=${symbol}&interval=${tf}&limit=500`;
-    const ex = [
-      ['Binance mirror', q('https://data-api.binance.vision/api/v3/klines'), parseBinance],
-      ['OKX', `https://www.okx.com/api/v5/market/candles?instId=${symbol.replace('USDT', '-USDT')}&bar=${OKX[tf]}&limit=300`, parseOKX],
-      ['Bybit', `https://api.bybit.com/v5/market/kline?category=spot&symbol=${symbol}&interval=${BYBIT[tf]}&limit=500`, parseBybit],
-      ['Binance', q('https://api.binance.com/api/v3/klines'), parseBinance]
-    ];
-    for (const [name, url, parse] of ex) {
+  };
+  if (market === 'synth') return viaDeriv(symbol);
+  if (market === 'forex') {
+    try { return await viaDeriv(item.dv); } catch (e) { errs.push('Deriv: ' + e.message); }
+    if (TDKEY) {
       try {
-        const cs = clean(parse(await getJSON(url, 9000, {'User-Agent': UA})));
-        if (cs.length >= 60) return {candles: cs, source: name};
-        errs.push(name + ': too few candles');
-      } catch (e) { errs.push(name + ': ' + e.message); }
+        const u = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(item.td)}&interval=${TDI[tf]}&outputsize=500&order=asc&timezone=UTC&apikey=${encodeURIComponent(TDKEY)}`;
+        const cs = clean(parseTD(await getJSON(u, 10000)));
+        if (cs.length >= 90) return {candles: cs, source: 'Twelve Data'};
+        errs.push('TwelveData: too few candles');
+      } catch (e) { errs.push('TwelveData: ' + e.message); }
+    }
+    const y = YAHOO[tf];
+    for (const tk of item.y) {
+      for (const host of ['query1', 'query2']) {
+        try {
+          const u = `https://${host}.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(tk)}?interval=${y.iv}&range=${y.range}&includePrePost=false`;
+          let cs = clean(parseYahoo(await getJSON(u, 10000, {'User-Agent': UA, 'Accept': 'application/json'})));
+          if (y.rs) cs = resample(cs, y.rs);
+          if (cs.length >= 90) return {candles: cs, source: 'Yahoo ' + tk};
+          errs.push('Yahoo ' + tk + ': too few candles');
+        } catch (e) { errs.push('Yahoo ' + tk + ' ' + host + ': ' + e.message); }
+      }
     }
     throw new Error(errs.join(' | '));
   }
-  // forex & gold
-  const f = FOREX.find(x => x.s === symbol);
-  if (TDKEY) {
+  // crypto: GitHub's servers are in the US where binance.com is blocked, so the mirror and OKX come first
+  const q = base => `${base}?symbol=${symbol}&interval=${tf}&limit=500`;
+  const ex = [
+    ['Binance mirror', q('https://data-api.binance.vision/api/v3/klines'), parseBinance],
+    ['OKX', `https://www.okx.com/api/v5/market/candles?instId=${symbol.replace('USDT', '-USDT')}&bar=${OKX[tf]}&limit=300`, parseOKX],
+    ['Bybit', `https://api.bybit.com/v5/market/kline?category=spot&symbol=${symbol}&interval=${BYBIT[tf]}&limit=500`, parseBybit],
+    ['Binance', q('https://api.binance.com/api/v3/klines'), parseBinance]
+  ];
+  for (const [name, url, parse] of ex) {
     try {
-      const u = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(f.td)}&interval=${TDI[tf]}&outputsize=500&order=asc&timezone=UTC&apikey=${encodeURIComponent(TDKEY)}`;
-      const cs = clean(parseTD(await getJSON(u, 10000)));
-      if (cs.length >= 60) return {candles: cs, source: 'Twelve Data'};
-      errs.push('TwelveData: too few candles');
-    } catch (e) { errs.push('TwelveData: ' + e.message); }
+      const cs = clean(parse(await getJSON(url, 9000, {'User-Agent': UA})));
+      if (cs.length >= 90) return {candles: cs, source: name};
+      errs.push(name + ': too few candles');
+    } catch (e) { errs.push(name + ': ' + e.message); }
   }
-  const y = YAHOO[tf];
-  for (const tk of f.y) {
-    for (const host of ['query1', 'query2']) {
-      try {
-        const u = `https://${host}.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(tk)}?interval=${y.iv}&range=${y.range}&includePrePost=false`;
-        let cs = clean(parseYahoo(await getJSON(u, 10000, {'User-Agent': UA, 'Accept': 'application/json'})));
-        if (y.rs) cs = resample(cs, y.rs);
-        if (cs.length >= 60) return {candles: cs, source: 'Yahoo ' + tk};
-        errs.push('Yahoo ' + tk + ': too few candles');
-      } catch (e) { errs.push('Yahoo ' + tk + ' ' + host + ': ' + e.message); }
-    }
-  }
-  if (f.bn) {
-    try {
-      const url = `https://data-api.binance.vision/api/v3/klines?symbol=${f.bn}&interval=${tf}&limit=500`;
-      const cs = clean(parseBinance(await getJSON(url, 9000)));
-      if (cs.length >= 60) return {candles: cs, source: 'Binance ' + f.bn + ' (USDT proxy)'};
-    } catch (e) { errs.push('Binance proxy: ' + e.message); }
+  if (item.dv) {
+    try { return await viaDeriv(item.dv); } catch (e) { errs.push('Deriv: ' + e.message); }
   }
   throw new Error(errs.join(' | '));
+}
+
+// one download per pair+timeframe per run (a 15m job and a 1h job share the same 1h candles)
+const cache = new Map();
+function cached(mk, symbol, tf) {
+  const k = mk + '|' + symbol + '|' + tf;
+  if (!cache.has(k)) cache.set(k, getCandles(mk, symbol, tf));
+  return cache.get(k);
 }
 
 async function analyzeJob(j) {
   const tfo = TF[j.tf];
   const [main, htf] = await Promise.all([
-    getCandles(j.mk, j.symbol, j.tf),
-    tfo.htf ? getCandles(j.mk, j.symbol, tfo.htf).catch(() => null) : Promise.resolve(null)
+    cached(j.mk, j.symbol, j.tf),
+    tfo.htf ? cached(j.mk, j.symbol, tfo.htf).catch(() => null) : Promise.resolve(null)
   ]);
   const now = Date.now();
   const closed = main.candles.filter(k => k.t + tfo.ms <= now);
@@ -500,22 +642,24 @@ async function tg(text) {
 const wat = t => new Date(t).toLocaleString('en-GB', {timeZone: 'Africa/Lagos', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false}) + ' WAT';
 
 function buildMessage(j, r) {
-  const d = r.direction, p = r.plan;
-  const why = r.comps.filter(c => c.score * d > 0 && Math.abs(c.score) >= 0.4 * c.max)
-    .sort((a, b) => b.score * d - a.score * d).slice(0, 4).map(c => c.name).join(', ');
-  const sgn = r.score > 0 ? '+' + r.score : String(r.score);
+  const p = r.plan, d = r.direction;
+  const ahead = r.zones.filter(z => z.type === (d > 0 ? 'resistance' : 'support')).sort((a, b) => a.dist - b.dist)[0];
   const lines = [
-    (r.signal === 'BUY' ? '🟢 BUY' : '🔴 SELL') + '  ' + labelOf(j.mk, j.symbol) + ' · ' + j.tf,
-    'Strength: ' + r.grade + ' (score ' + sgn + '/100)',
+    (d > 0 ? '🟢 BUY' : '🔴 SELL') + '  ' + nameOf(j.mk, j.symbol) + ' · ' + j.tf,
+    'Setup: ' + r.setup.name,
+    'Strength: ' + r.grade + ' (score ' + r.score + '/100)',
     '',
     'Entry: ' + fmt(p.entry),
     'Stop loss: ' + fmt(p.sl) + ' (' + p.slPct.toFixed(2) + '%)',
     'TP1: ' + fmt(p.tp1) + ' (1.5R)',
     'TP2: ' + fmt(p.tp2) + ' (2.5R)',
     '',
-    'Why: ' + (why || 'multiple indicators agree'),
+    'Why:',
+    ...r.setup.notes.slice(0, 4).map(n => '• ' + n),
+    '',
+    'Market: ' + r.trend.label,
     r.htf ? 'Higher TF (' + r.htf.tf + '): ' + r.htf.label : 'Higher TF: n/a',
-    'RSI ' + r.ind.rsi.toFixed(0) + ' · ADX ' + r.ind.adx.toFixed(0) + ' · ATR ' + fmt(r.ind.atr),
+    ahead ? 'Next ' + (d > 0 ? 'resistance' : 'support') + ' zone: ' + fmt(ahead.bottom) + ' - ' + fmt(ahead.top) + ' (' + ahead.dist.toFixed(1) + ' ATR away)' : 'No ' + (d > 0 ? 'resistance' : 'support') + ' zone ahead in view',
     'Candle closed: ' + wat(r.lastT + TF[j.tf].ms),
     '',
     'Not financial advice. Risk 1% or less per trade, always use the stop loss.'
@@ -537,10 +681,10 @@ async function main() {
   const now = Date.now();
   const jobs = [];
   for (const mk of MARKETS) {
-    if (mk === 'forex' && forexClosed(now)) { console.log('Forex market closed, skipping forex.'); continue; }
-    const list = mk === 'crypto' ? CRYPTO : mk === 'forex' ? FOREX.map(f => f.s) : mk === 'synth' ? SYNTH.map(x => x.s) : [];
-    for (const symbol of list) for (const tf of TIMEFRAMES) {
-      const ms = TF[tf].ms, boundary = Math.floor(now / ms) * ms, key = mk + '|' + symbol + '|' + tf;
+    if (!LISTS[mk]) continue;
+    if (mk === 'forex' && forexClosed(now)) { console.log('Forex and metals market closed, skipping.'); continue; }
+    for (const item of LISTS[mk]) for (const tf of TIMEFRAMES) {
+      const symbol = item.s, ms = TF[tf].ms, boundary = Math.floor(now / ms) * ms, key = mk + '|' + symbol + '|' + tf;
       if (state.done[key] === boundary) continue;      // already analysed this candle
       if (now - boundary < SETTLE_MS) continue;        // candle only just closed, wait a moment
       if (state.retry[key] && now < state.retry[key]) continue;
@@ -562,14 +706,14 @@ async function main() {
         if (r.ageMs > maxAgeMs(j.tf)) { console.log('· ' + j.key + ': ' + r.signal + ' but candle is old, skipped'); continue; }
         const prev = state.alerts[j.key];
         if (prev && prev.signal === r.signal && (r.lastT - prev.t) <= REPEAT_CANDLES * TF[j.tf].ms) continue;
-        if (await tg(buildMessage(j, r))) { state.alerts[j.key] = {signal: r.signal, t: r.lastT}; sent++; console.log('✓ alert sent: ' + j.key + ' ' + r.signal); }
+        if (await tg(buildMessage(j, r))) { state.alerts[j.key] = {signal: r.signal, t: r.lastT}; sent++; console.log('✓ alert sent: ' + j.key + ' ' + r.signal + ' (' + r.setup.name + ')'); }
       } catch (e) {
         errors++; state.retry[j.key] = Date.now() + RETRY_MS;
         console.log('✗ ' + j.key + ': ' + String(e.message).slice(0, 300));
       }
     }
   };
-  await Promise.all(Array.from({length: 4}, worker));
+  await Promise.all(Array.from({length: 3}, worker));
   saveState(state);
   console.log(`Done. analysed=${jobs.length} signals=${signals} alerts_sent=${sent} errors=${errors}`);
 }
